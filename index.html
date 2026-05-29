@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>SEA Monitor</title>
+    <style>
+        body {
+            margin: 0; padding: 10px;
+            background-color: #0C2C56; color: white; /* マリナーズネイビー */
+            font-family: Arial, sans-serif; overflow: hidden;
+        }
+        .score-row { font-size: 16px; font-weight: bold; color: #00CBFF; text-align: center; border-bottom: 1px solid #005A5C; padding-bottom: 5px; }
+        .matchup-row { font-size: 11px; color: #E0E0E0; text-align: center; margin-top: 5px; }
+        .pitch-row { font-size: 14px; font-weight: bold; color: #FFD700; text-align: center; margin-top: 6px; background-color: rgba(0, 0, 0, 0.2); padding: 6px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div id="score" class="score-row">Loading...</div>
+    <div id="matchup" class="matchup-row">Connecting to MLB...</div>
+    <div id="pitch" class="pitch-row">Waiting...</div>
+
+    <script>
+        const MARINERS_ID = 136;
+        let gamePk = null;
+
+        async function getGamePk() {
+            const today = new Date().toISOString().split('T')[0];
+            const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
+            try {
+                const res = await fetch(url); const data = await res.json();
+                if (data.dates && data.dates[0]) {
+                    for (let game of data.dates[0].games) {
+                        if (game.teams.away.team.id === MARINERS_ID || game.teams.home.team.id === MARINERS_ID) return game.gamePk;
+                    }
+                }
+            } catch (e) {} return null;
+        }
+
+        async function updateMonitor() {
+            if (!gamePk) gamePk = await getGamePk();
+            if (!gamePk) {
+                document.getElementById('score').innerText = "No Game Today";
+                document.getElementById('pitch').innerText = "⚾ SEA Mariners";
+                return;
+            }
+            try {
+                const res = await fetch(`https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`);
+                const data = await res.json();
+                const status = data.gameData.status.abstractGameState;
+                const away = data.gameData.teams.away.teamName;
+                const home = data.gameData.teams.home.teamName;
+
+                if (status === "Preview") {
+                    document.getElementById('score').innerText = `⚾ ${away} @ ${home}`;
+                    document.getElementById('pitch').innerText = "Pre-game";
+                    return;
+                } else if (status === "Final") {
+                    const ls = data.liveData.linescore;
+                    document.getElementById('score').innerText = `Final: ${away} ${ls.teams.away.runs} - ${ls.teams.home.runs} ${home}`;
+                    document.getElementById('pitch').innerText = "Game Over";
+                    return;
+                }
+
+                const ls = data.liveData.linescore;
+                const cp = data.liveData.plays.currentPlay || {};
+                document.getElementById('score').innerText = `${away} ${ls.teams.away.runs || 0} - ${ls.teams.home.runs || 0} ${home} (${ls.inningState === "Top" ? "▲" : "▼"}${ls.currentInningOrdinal})`;
+
+                const count = cp.count || { balls: 0, strikes: 0, outs: 0 };
+                const pitcher = cp.matchup?.pitcher?.fullName?.split(' ').pop() || "P";
+                const batter = cp.matchup?.batter?.fullName?.split(' ').pop() || "B";
+                document.getElementById('matchup').innerText = `P: ${pitcher} vs B: ${batter} [● ${count.balls}-${count.strikes} ${count.outs}Out]`;
+
+                const events = cp.playEvents || [];
+                if (events.length > 0) {
+                    const last = events[events.length - 1];
+                    if (last.isPitch) {
+                        const kmh = last.pitchData?.startSpeed ? `${Math.floor(last.pitchData.startSpeed * 1.60934)}km/h` : "";
+                        document.getElementById('pitch').innerText = `⚾ ${last.details?.type?.description || "Pitch"} ${kmh} -> ${last.details?.call?.description || ""}`;
+                    } else {
+                        document.getElementById('pitch').innerText = `📢 ${last.details?.description || ""}`;
+                    }
+                }
+            } catch (e) {}
+        }
+        setInterval(updateMonitor, 4000); // 4秒ごとに自動更新
+        updateMonitor();
+    </script>
+</body>
+</html>
