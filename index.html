@@ -2,21 +2,35 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SEA Monitor</title>
+    <title>SEA Detailed Monitor</title>
     <style>
         body {
             margin: 0; padding: 10px;
             background-color: #0C2C56; color: white; /* マリナーズネイビー */
-            font-family: Arial, sans-serif; overflow: hidden;
+            font-family: 'Helvetica Neue', Arial, sans-serif; overflow: hidden;
         }
         .score-row { font-size: 16px; font-weight: bold; color: #00CBFF; text-align: center; border-bottom: 1px solid #005A5C; padding-bottom: 5px; }
         .matchup-row { font-size: 11px; color: #E0E0E0; text-align: center; margin-top: 5px; }
-        .pitch-row { font-size: 14px; font-weight: bold; color: #FFD700; text-align: center; margin-top: 6px; background-color: rgba(0, 0, 0, 0.2); padding: 6px; border-radius: 4px; }
+        .batter-stats { font-size: 10px; color: #88C0D0; text-align: center; margin-top: 2px; }
+        
+        /* ランナーと配球履歴の行 */
+        .live-status-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; font-size: 12px; padding: 0 10px; }
+        .bases { color: #A3BE8C; font-family: monospace; letter-spacing: -2px; font-size: 14px; }
+        .pitch-history { color: #D8DEE9; letter-spacing: 2px; }
+
+        .pitch-row { font-size: 14px; font-weight: bold; color: #FFD700; text-align: center; margin-top: 6px; background-color: rgba(0, 0, 0, 0.3); padding: 6px; border-radius: 4px; }
     </style>
 </head>
 <body>
     <div id="score" class="score-row">Loading...</div>
     <div id="matchup" class="matchup-row">Connecting to MLB...</div>
+    <div id="batter_stats" class="batter-stats"></div>
+    
+    <div class="live-status-row">
+        <div id="bases" class="bases">◇<br>◇  ◇</div>
+        <div id="pitch_history" class="pitch-history"></div>
+    </div>
+
     <div id="pitch" class="pitch-row">Waiting...</div>
 
     <script>
@@ -25,7 +39,7 @@
 
         async function getGamePk() {
             const today = new Date().toISOString().split('T')[0];
-            const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}`;
+            const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}`;
             try {
                 const res = await fetch(url); const data = await res.json();
                 if (data.dates && data.dates[0]) {
@@ -63,14 +77,47 @@
 
                 const ls = data.liveData.linescore;
                 const cp = data.liveData.plays.currentPlay || {};
+                
+                // 1. スコア＆イニング
                 document.getElementById('score').innerText = `${away} ${ls.teams.away.runs || 0} - ${ls.teams.home.runs || 0} ${home} (${ls.inningState === "Top" ? "▲" : "▼"}${ls.currentInningOrdinal})`;
 
+                // 2. 対戦とカウント
                 const count = cp.count || { balls: 0, strikes: 0, outs: 0 };
                 const pitcher = cp.matchup?.pitcher?.fullName?.split(' ').pop() || "P";
                 const batter = cp.matchup?.batter?.fullName?.split(' ').pop() || "B";
                 document.getElementById('matchup').innerText = `P: ${pitcher} vs B: ${batter} [● ${count.balls}-${count.strikes} ${count.outs}Out]`;
 
+                // 3. 打者の本日の成績 (例: 2-3, 1HR)
+                const bStats = cp.matchup?.batterHotColdZones ? "" : ""; // 簡易的にデータから抽出
+                // API内部から打席結果数を計算
+                const ab = cp.matchup?.splits?.atBats || 0;
+                const hits = cp.matchup?.splits?.hits || 0;
+                const rbi = cp.matchup?.splits?.rbi || 0;
+                const hr = cp.matchup?.splits?.homeRuns || 0;
+                document.getElementById('batter_stats').innerText = `Today: ${hits}打数${ab}安打 (${hr}HR ${rbi}打点)`;
+
+                // 4. ランナー状況（野球盤スタイル）
+                const off = ls.offense || {};
+                const b1 = off.first ? "◆" : "◇";
+                const b2 = off.second ? "◆" : "◇";
+                const b3 = off.third ? "◆" : "◇";
+                document.getElementById('bases').innerHTML = `&nbsp;&nbsp;${b2}<br>${b3}&nbsp;&nbsp;&nbsp;${b1}`;
+
+                // 5. 今の打席の配球履歴 (B=ボール, S=ストライク, F=ファウル)
                 const events = cp.playEvents || [];
+                let historyStr = "";
+                events.forEach(e => {
+                    if (e.isPitch) {
+                        const code = e.details?.code; // B, S, F, Xなど
+                        if (code === "B") historyStr += "🟢"; // ボール
+                        else if (code === "S" || code === "C") historyStr += "🔴"; // 空振り/見逃しストライク
+                        else if (code === "F") historyStr += "🟡"; // ファウル
+                        else if (code === "X") historyStr += "💥"; // 打球
+                    }
+                });
+                document.getElementById('pitch_history').innerText = historyStr || "First Pitch";
+
+                // 6. 直近の投球詳細
                 if (events.length > 0) {
                     const last = events[events.length - 1];
                     if (last.isPitch) {
@@ -82,7 +129,7 @@
                 }
             } catch (e) {}
         }
-        setInterval(updateMonitor, 4000); // 4秒ごとに自動更新
+        setInterval(updateMonitor, 4000);
         updateMonitor();
     </script>
 </body>
